@@ -44,4 +44,3 @@ jobs:
         with:
           # The file is now correctly named with the .sarif extension
           sarif_file: bandit-results.sarif
-          tools: bandit
