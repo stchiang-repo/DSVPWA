@@ -24,7 +24,6 @@ jobs:
         with:
           python-version: '3.x'
 
-      # CORRECTED STEP: Install Bandit with the official [sarif] extra
       - name: Install dependencies and Bandit
         run: |
           python -m pip install --upgrade pip
@@ -32,15 +31,12 @@ jobs:
           # This installs Bandit and the required SARIF dependencies
           pip install bandit[sarif]
 
-      # Run Bandit and use the built-in 'sarif' formatter
       - name: Run Bandit and save SARIF output
         run: |
           # Use the built-in '--format sarif' argument to generate the SARIF file directly
           bandit -r . --format sarif --output bandit-results.sarif
 
-      # Upload Results to GitHub Security Tab
       - name: Upload Bandit results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
         with:
-          # The file is now correctly named with the .sarif extension
           sarif_file: bandit-results.sarif
