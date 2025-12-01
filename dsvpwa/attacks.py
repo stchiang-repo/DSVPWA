@@ -9,6 +9,35 @@ import subprocess
 import urllib.request
 import urllib.parse as urlparse
 
+import secrets 
+import hashlib 
+import hmac 
+
+HMAC_SECRET = os.environ.get("HMAC_SECRET") 
+if not HMAC_SECRET:
+    raise Exception("HMAC_SECRET not set")
+HMAC_SECRET = HMAC_SECRET.encode()
+
+def generate_secure_session():
+    raw = secrets.token_hex(32)
+    sig = hmac.new(
+        HMAC_SECRET, 
+        raw.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return f"{raw}.{sig}"
+
+def validate_session(token: str) -> bool: 
+    try:
+        raw, supplied_sig = token.split(".")
+    except ValueError:
+        return False
+    expected_sig = hmac.new(
+        HMAC_SECRET, 
+        raw.encode("utf-8"),
+        hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected_sig, supplied_sig)
 
 class Attack():
     warning = (
@@ -248,8 +277,12 @@ class SessionHijacking(Attack):
         content = 'Please login, <strong>Anonymous</strong>!'
 
         if 'SESSIONID' in handler.cookie:
-            session = handler.cookie['SESSIONID'].value
-            cursor.execute("SELECT * FROM users WHERE session = ?", [session])
+            return content
+        session = handler.cookie['SESSIONID'].value
+        if not validate_session(session):
+            return "Invalid session token."
+        raw_session = session.split(".")[0]
+        cursor.execute("SELECT * FROM users WHERE session = ?", [session])
 
             user = cursor.fetchone()
             if user:
@@ -267,8 +300,7 @@ class AuthBypass(Attack):
     def run(self, handler):
         params = handler.params
         connection = handler.server.connection
-        cursor = connection.cursor()
-        session = handler.cookie['SESSIONID'].value
+        cursor = connection.cursor()  
 
         type = 'empty'
         message = ''
@@ -282,20 +314,20 @@ class AuthBypass(Attack):
             username = re.sub(r"[^\w]", '', params.get('username')[0])
             password = params.get('password')[0]
 
-            if username == 'dsvpwa' and password == 'dsvpwa':
-                user = ['dsvpwa', 'Default', 'Default', 'dsvpwa']
-            else:
-                try:
-                    cursor.execute("SELECT * FROM users WHERE username='" +  username + "' AND password='" + password + "'")
-                except sqlite3.OperationalError as e:
-                    return content.format(type=type, message=e)
+            try:
+                cursor.execute("SELECT * FROM users WHERE username='" +  username + "' AND password='" + password + "'")
                 user = cursor.fetchone()
+            except sqlite3.OperationalError as e:
+                return content.format(type="danger", message=str(e))
 
             if user:
                 type = 'success'
                 message = 'Welcome <strong>{} {}</strong>!'.format(user[2], user[3])
-                cursor.execute("UPDATE users SET session = ? WHERE id = ?", (session, user[0]))
+                new_session = generate_secure_session()
+                raw_session = new_session_split('.')[0]
+                cursor.execute("UPDATE users SET session = ? WHERE id = ?", (raw_session, user[0]))
                 connection.commit()
+                handler.cookie['SESSIONID'] = new_session
             else:
                 type = 'danger'
                 message = 'The username and/or password is incorrect!'
@@ -314,7 +346,10 @@ class XSRequestForgery(Attack):
 
         if 'SESSIONID' in handler.cookie:
             session = handler.cookie['SESSIONID'].value
-            cursor.execute("SELECT * FROM users WHERE session = ?", [session])
+            if not validate_session(session):
+                return "Invalid session token."
+            raw_session = session.split(".")[0]
+            cursor.execute("SELECT * FROM users WHERE session = ?", [raw_session])
 
             user = cursor.fetchone()
             if user:
@@ -358,7 +393,10 @@ class Clickjacking(Attack):
 
         if 'SESSIONID' in handler.cookie:
             session = handler.cookie['SESSIONID'].value
-            cursor.execute("SELECT * FROM users WHERE session = ?", [session])
+            if not validate_session(session):
+                return "Invalid session token."
+            raw_session = session.split(".")[0]
+            cursor.execute("SELECT * FROM users WHERE session = ?", [raw_session])
 
             user = cursor.fetchone()
             if user:
